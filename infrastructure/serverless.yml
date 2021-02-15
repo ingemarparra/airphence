@@ -1,0 +1,106 @@
+
+service: airphence
+provider: 
+  name: aws
+  stack_name: ${self:custom.config.default.stack_name}
+  region: us-east-1
+  cfnRole: arn:aws:iam::${self:custom.config.${self:custom.stage}.aws_account_id}:role/CloudFormationExecutionRole  # This Role Must be created on other stack or on the console
+  stage: ${self:custom.stage}
+
+custom:
+  stage: ${opt:env}
+  config:
+    default:
+      stack_name: ${self:service}-${self:custom.stage}
+
+resources:
+  Resources:
+    AirphenceBeaconLogDBTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
+        AttributeDefinitions:
+          - AttributeName: "id"             # corporation_id|driver_id
+            AttributeType: "S"
+          - AttributeName: "time"
+            AttributeType: "S"
+          - AttributeName: "id"
+            AttributeType: "S"
+          - AttributeName: "corporation_id"
+            AttributeType: "S"
+          - AttributeName: "driver_id"
+            AttributeType: "S"
+        BillingMode: PAY_PER_REQUEST
+        KeySchema: 
+          - AttributeName: "id"
+            KeyType: "HASH"
+          - AttributeName: "time"
+            KeyType: "RANGE"
+        TableName: "beacons"
+        GlobalSecondaryIndexes: 
+          - IndexName: "active-drivers-gsi"
+            KeySchema: 
+              - AttributeName: "corporation_id"
+                KeyType: "HASH"
+              - AttributeName: "driver_id"
+                KeyType: "RANGE"
+            Projection: 
+              ProjectionType: "ALL"
+
+    AirphenceApiGateway:
+      Type: AWS::ApiGateway::RestApi
+      Properties:
+        Name: airphence
+
+    BeaconsResource:
+      Type: AWS::ApiGateway::Resource
+      Properties:
+        RestApiId:
+          Ref: AirphenceApiGateway
+        ParentId:
+          Fn::GetAtt:
+          - AirphenceApiGateway
+          - RootResourceId
+        PathPart: beacons
+
+    BeaconApiDeploy:
+      Type: AWS::ApiGateway::Deployment
+      Properties:
+        RestApiId:
+          Ref: AirphenceApiGateway
+        StageName: ${self:custom.stage}
+
+    BeaconPost:
+      Type: AWS::ApiGateway::Method
+      Properties:
+        RestApiId:
+          Ref: AirphenceApiGateway
+        ResourceId:
+          Ref: BeaconsResource
+        HttpMethod: POST
+        AuthorizationType: NONE # Change this to Cognito
+        Integration:
+          IntegrationHttpMethod: POST
+          Credentials: arn:aws:iam::${self:custom.config.${self:custom.stage}.aws_account_id}:role/AirphenceRole  # This Role Must be created on other stack or on the console
+          Type: AWS
+          Uri: arn:aws:apigateway:${self:provider.region}:dynamodb:action/PutItem
+          RequestTemplates:
+            # Depending on the implementation
+            application/json: >- 
+              {
+
+              }
+          IntegrationResponses:
+            ResponseTemplates:
+              application/json: >-
+                {
+
+                }
+            StatusCode: 200
+        RequestParameters:
+          method.request.header.tenant_id: true
+        MethodResponses:
+          ResponseModels:
+            application/json: Empty
+          StatusCode: 200
